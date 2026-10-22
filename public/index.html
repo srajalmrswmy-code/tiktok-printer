@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>طابعة البث</title>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@500;700;900&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#15171d;--paper:#f8f6ee;--ink:#17171c;--mute:#6b6a72;--led:#ff4d79;--body1:#3a3e49;--body2:#252831}
+*{box-sizing:border-box;margin:0}
+html,body{height:100%}
+body{background:var(--bg);color:#f3f1ff;font-family:'Cairo',system-ui,sans-serif;display:flex;flex-direction:column;align-items:center;padding:env(safe-area-inset-top) 12px env(safe-area-inset-bottom);overflow:hidden}
+#setup{margin:auto;width:100%;max-width:340px;display:flex;flex-direction:column;gap:12px;text-align:center}
+#setup h1{font-size:26px;font-weight:900}
+#setup p{color:#a9a7b8;font-size:14px}
+input,button{font:inherit;border-radius:12px;border:0;padding:14px}
+input{background:#242733;color:#fff;text-align:center;direction:ltr}
+button{background:var(--led);color:#fff;font-weight:700}
+button.alt{background:#2c2f3d}
+#err{color:var(--led);font-size:13px;min-height:18px}
+
+#stage{display:none;flex:1;width:100%;max-width:380px;flex-direction:column;min-height:0;padding-top:10px}
+#paper{flex:1;min-height:0;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;overflow:hidden;
+  -webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 14%);mask-image:linear-gradient(to bottom,transparent 0,#000 14%);
+  margin-bottom:-12px;position:relative;z-index:1}
+.slip{width:80%;overflow:hidden;background:var(--paper);color:var(--ink);flex:none}
+.slip .in{padding:14px 14px 16px;display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;border-bottom:2px dashed #c9c6b8}
+.slip img{width:64px;height:64px;border-radius:50%;object-fit:cover;filter:grayscale(1) contrast(1.35);border:2px solid var(--ink)}
+.slip .name{font-size:20px;font-weight:900;line-height:1.3;word-break:break-word}
+.slip .msg{font-size:15px;font-weight:700}
+.slip .time{font-size:11px;color:var(--mute);font-weight:500}
+
+#printer{position:relative;z-index:2;width:100%;height:84px;border-radius:20px;background:linear-gradient(var(--body1),var(--body2));box-shadow:0 -2px 0 #4b5060 inset,0 10px 24px #0008;flex:none;margin-bottom:12px}
+#printer::before{content:"";position:absolute;top:10px;left:7%;right:7%;height:12px;border-radius:6px;background:#07080b;box-shadow:0 2px 0 #555a6a}
+#printer .led{position:absolute;bottom:16px;right:20px;width:12px;height:12px;border-radius:50%;background:#4a2a33;transition:background .2s}
+#printer.on .led{background:var(--led);box-shadow:0 0 10px var(--led)}
+#printer .lbl{position:absolute;bottom:12px;left:20px;font-size:13px;color:#9aa0b3;font-weight:700}
+</style>
+</head>
+<body>
+<div id="setup">
+  <h1>طابعة البث</h1>
+  <p>اكتب اسم حسابك بتيك توك وابدأ البث، بعدها اضغط اتصال.</p>
+  <input id="user" placeholder="username" autocapitalize="off" autocomplete="off">
+  <button id="go">اتصال</button>
+  <button id="demo" class="alt">تجربة الطابعة</button>
+  <div id="err"></div>
+</div>
+
+<div id="stage">
+  <div id="paper"></div>
+  <div id="printer"><span class="led"></span><span class="lbl">طابعة البث</span></div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const paper = $('paper'), printer = $('printer');
+const TEXT = {
+  gift:   () => null,
+  like:   () => null,
+  join:   () => 'نورت البث',
+  follow: () => 'شكراً على المتابعة',
+  share:  () => 'شكراً على المشاركة'
+};
+
+function build(ev) {
+  const slip = document.createElement('div'); slip.className = 'slip';
+  const inner = document.createElement('div'); inner.className = 'in';
+  if ((ev.kind === 'gift' || ev.kind === 'follow') && ev.pic) {
+    const img = document.createElement('img');
+    img.referrerPolicy = 'no-referrer'; img.src = ev.pic;
+    img.onerror = () => img.remove();
+    inner.appendChild(img);
+  }
+  const name = document.createElement('div'); name.className = 'name';
+  name.textContent = (ev.kind === 'like' ? '♥ ' : '') + ev.name;
+  inner.appendChild(name);
+  let msg = TEXT[ev.kind]();
+  if (ev.kind === 'gift') msg = 'أرسل هدية: ' + ev.gift + ' ×' + ev.count;
+  if (msg) { const m = document.createElement('div'); m.className = 'msg'; m.textContent = msg; inner.appendChild(m); }
+  const t = document.createElement('div'); t.className = 'time';
+  t.textContent = new Date().toLocaleTimeString('ar-IQ', { hour: '2-digit', minute: '2-digit' });
+  inner.appendChild(t);
+  slip.appendChild(inner);
+  return { slip, inner };
+}
+
+const queue = []; let busy = false;
+function enqueue(ev) {
+  if (queue.length > 25) { const i = queue.findIndex(e => e.kind === 'like' || e.kind === 'join'); if (i >= 0) queue.splice(i, 1); else return; }
+  queue.push(ev); if (!busy) next();
+}
+function next() {
+  const ev = queue.shift();
+  if (!ev) { busy = false; printer.classList.remove('on'); return; }
+  busy = true; printer.classList.add('on');
+  const { slip, inner } = build(ev);
+  paper.appendChild(slip);
+  const H = inner.offsetHeight;
+  const dur = 600 + H * 5;
+  slip.style.height = '0px';
+  slip.getBoundingClientRect();
+  slip.style.transition = `height ${dur}ms steps(${Math.max(6, Math.round(H / 7))})`;
+  slip.style.height = H + 'px';
+  while (paper.children.length > 8) paper.firstChild.remove();
+  setTimeout(next, dur + 250);
+}
+
+function show() { $('setup').style.display = 'none'; $('stage').style.display = 'flex'; }
+
+$('go').onclick = async () => {
+  const user = $('user').value.trim();
+  $('err').textContent = 'جاري الاتصال...';
+  try {
+    const r = await (await fetch('/connect?user=' + encodeURIComponent(user))).json();
+    if (!r.ok) { $('err').textContent = r.error; return; }
+  } catch (e) { $('err').textContent = 'فشل الاتصال بالسيرفر'; return; }
+  show();
+};
+
+$('demo').onclick = () => {
+  show();
+  [
+    { kind: 'join', name: 'سارة' },
+    { kind: 'like', name: 'علي' },
+    { kind: 'follow', name: 'محمد', pic: '' },
+    { kind: 'share', name: 'زينب' },
+    { kind: 'gift', name: 'حسين', pic: '', gift: 'Rose', count: 3 }
+  ].forEach(enqueue);
+};
+
+new EventSource('/events').onmessage = e => {
+  const { type, data } = JSON.parse(e.data);
+  if (type === 'print') enqueue(data);
+};
+</script>
+</body>
+</html>
